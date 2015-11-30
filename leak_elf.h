@@ -7,6 +7,8 @@
 # include <stdlib.h>
 # include <string.h>
 
+# define BASE_ADDRESS	0x400000
+
 typedef struct s_tables_addr		t_tables_addr;
 
 struct				s_tables_addr

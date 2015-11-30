@@ -32,13 +32,13 @@ Elf64_Ehdr				*leak_elf_ehdr(void *param, t_leak_ft leak_data)
 	/* e_phoff offset in Ehdr */
 	off = sizeof(unsigned char) * EI_NIDENT + sizeof(Elf64_Half) * 2
 		+ sizeof(Elf64_Word) + sizeof(Elf64_Addr);
-	if (!(e_phoff = leak_data(param, 0x400000 + off, sizeof(Elf64_Off))))
+	if (!(e_phoff = leak_data(param, BASE_ADDRESS + off, sizeof(Elf64_Off))))
 		return (NULL);
 	e_hdr->e_phoff = *e_phoff;
 	free(e_phoff);
 	/* e_phnum offset in Ehdr */
 	off += sizeof(Elf64_Off) * 2 + sizeof(Elf64_Word) + sizeof(Elf64_Half) * 2;
-	if (!(e_phnum = leak_data(param, 0x400000 + off, sizeof(Elf64_Half))))
+	if (!(e_phnum = leak_data(param, BASE_ADDRESS + off, sizeof(Elf64_Half))))
 		return (NULL);
 	e_hdr->e_phnum = *e_phnum;
 	free(e_phnum);
@@ -86,7 +86,7 @@ Elf64_Phdr				*fill_phdr_entry(void *param, t_leak_ft leak_data,
 
 	/* adjust to p_vaddr offset in Phdr entry */
 	off += sizeof(Elf64_Word) * 2 + sizeof(Elf64_Off);
-	if (!(p_vaddr = leak_data(param, e_hdr->e_phoff + 0x400000 + off,
+	if (!(p_vaddr = leak_data(param, e_hdr->e_phoff + BASE_ADDRESS + off,
 							 sizeof(*p_vaddr))))
 	{
 		free(p_hdr);
@@ -96,7 +96,7 @@ Elf64_Phdr				*fill_phdr_entry(void *param, t_leak_ft leak_data,
 	free(p_vaddr);
 	/* adjust to p_memsz offset in Phdr entry */
 	off += sizeof(Elf64_Addr) * 2 + sizeof(Elf64_Xword);
-	if (!(p_memsz = leak_data(param, e_hdr->e_phoff + 0x400000 + off,
+	if (!(p_memsz = leak_data(param, e_hdr->e_phoff + BASE_ADDRESS + off,
 							 sizeof(*p_memsz))))
 	{
 		free(p_hdr);
@@ -119,7 +119,7 @@ Elf64_Phdr				*leak_elf_phdr_entry(void *param, t_leak_ft leak_data,
 
 	if (!(p_hdr = malloc(sizeof(*p_hdr))))
 		return (NULL);
-	if (!(p_type = leak_data(param, e_hdr->e_phoff + 0x400000, sizeof(*p_type))))
+	if (!(p_type = leak_data(param, e_hdr->e_phoff + BASE_ADDRESS, sizeof(*p_type))))
 		return (NULL);
 	i = sizeof(*p_hdr);
 	p_hdr->p_type = *p_type;
@@ -128,7 +128,7 @@ Elf64_Phdr				*leak_elf_phdr_entry(void *param, t_leak_ft leak_data,
 		return (fill_phdr_entry(param, leak_data, e_hdr, p_hdr, 0));
 	while (i < sizeof(*p_hdr) * e_hdr->e_phnum)
 	{
-		if (!(p_type = leak_data(param, e_hdr->e_phoff + 0x400000 + i,
+		if (!(p_type = leak_data(param, e_hdr->e_phoff + BASE_ADDRESS + i,
 								sizeof(*p_type))))
 			return (NULL);
 		if (*p_type == type)
