@@ -1,5 +1,6 @@
 #include <leak_elf.h>
 
+/*
 Elf64_Ehdr				*leak_elf_ehdr(void *param, t_leak_ft leak_data)
 {
 	Elf64_Ehdr			*e_hdr;
@@ -14,7 +15,38 @@ Elf64_Ehdr				*leak_elf_ehdr(void *param, t_leak_ft leak_data)
 	}
 	return (e_hdr);
 }
+*/
 
+/*
+ * Need only e_phoff and e_phnum
+ */
+Elf64_Ehdr				*leak_elf_ehdr(void *param, t_leak_ft leak_data)
+{
+	Elf64_Ehdr			*e_hdr;
+	long				off;
+	Elf64_Off			*e_phoff;
+	Elf64_Half			*e_phnum;
+
+	if (!(e_hdr = malloc(sizeof(*e_hdr))))
+		return (NULL);
+	/* e_phoff offset in Ehdr */
+	off = sizeof(unsigned char) * EI_NIDENT + sizeof(Elf64_Half) * 2
+		+ sizeof(Elf64_Word) + sizeof(Elf64_Addr);
+	if (!(e_phoff = leak_data(param, 0x400000 + off, sizeof(Elf64_Off))))
+		return (NULL);
+	e_hdr->e_phoff = *e_phoff;
+	free(e_phoff);
+	/* e_phnum offset in Ehdr */
+	off += sizeof(Elf64_Off) * 2 + sizeof(Elf64_Word) + sizeof(Elf64_Half) * 2;
+	if (!(e_phnum = leak_data(param, 0x400000 + off, sizeof(Elf64_Half))))
+		return (NULL);
+	e_hdr->e_phnum = *e_phnum;
+	free(e_phnum);
+	return (e_hdr);
+}
+
+
+/*
 Elf64_Phdr				*leak_elf_phdr_entry(void *param, t_leak_ft leak_data,
 											 Elf64_Ehdr *e_hdr,
 											 Elf64_Word type)
@@ -25,7 +57,7 @@ Elf64_Phdr				*leak_elf_phdr_entry(void *param, t_leak_ft leak_data,
 	if (!(p_hdr = leak_data(param, e_hdr->e_phoff + 0x400000, sizeof(*p_hdr))))
 		return (NULL);
 	i = sizeof(*p_hdr);
-	while (p_hdr->p_type != type && i < e_hdr->e_phentsize * e_hdr->e_phnum)
+	while (p_hdr->p_type != type && i < sizeof(*p_hdr) * e_hdr->e_phnum)
 	{
 		free(p_hdr);
 		if (!(p_hdr = leak_data(param, e_hdr->e_phoff + 0x400000 + i,
@@ -38,6 +70,77 @@ Elf64_Phdr				*leak_elf_phdr_entry(void *param, t_leak_ft leak_data,
 		free(p_hdr);
 		p_hdr = NULL;
 	}
+	return (p_hdr);
+}
+
+*/
+
+/* Need only p_memsz, p_vaddr and p_type */
+
+Elf64_Phdr				*fill_phdr_entry(void *param, t_leak_ft leak_data,
+										 Elf64_Ehdr *e_hdr, Elf64_Phdr *p_hdr,
+										 long off)
+{
+	Elf64_Addr			*p_vaddr;
+	Elf64_Xword			*p_memsz;
+
+	/* adjust to p_vaddr offset in Phdr entry */
+	off += sizeof(Elf64_Word) * 2 + sizeof(Elf64_Off);
+	if (!(p_vaddr = leak_data(param, e_hdr->e_phoff + 0x400000 + off,
+							 sizeof(*p_vaddr))))
+	{
+		free(p_hdr);
+		return (NULL);
+	}
+	p_hdr->p_vaddr = *p_vaddr;
+	free(p_vaddr);
+	/* adjust to p_memsz offset in Phdr entry */
+	off += sizeof(Elf64_Addr) * 2 + sizeof(Elf64_Xword);
+	if (!(p_memsz = leak_data(param, e_hdr->e_phoff + 0x400000 + off,
+							 sizeof(*p_memsz))))
+	{
+		free(p_hdr);
+		p_hdr = NULL;
+		return (NULL);
+	}
+	else
+		p_hdr->p_memsz = *p_memsz;
+	free(p_memsz);
+	return (p_hdr);
+}
+
+Elf64_Phdr				*leak_elf_phdr_entry(void *param, t_leak_ft leak_data,
+											 Elf64_Ehdr *e_hdr,
+											 Elf64_Word type)
+{
+	Elf64_Phdr			*p_hdr;
+	ssize_t				i;
+	Elf64_Word			*p_type;
+
+	if (!(p_hdr = malloc(sizeof(*p_hdr))))
+		return (NULL);
+	if (!(p_type = leak_data(param, e_hdr->e_phoff + 0x400000, sizeof(*p_type))))
+		return (NULL);
+	i = sizeof(*p_hdr);
+	p_hdr->p_type = *p_type;
+	free(p_type);
+	if (*p_type == type)
+		return (fill_phdr_entry(param, leak_data, e_hdr, p_hdr, 0));
+	while (i < sizeof(*p_hdr) * e_hdr->e_phnum)
+	{
+		if (!(p_type = leak_data(param, e_hdr->e_phoff + 0x400000 + i,
+								sizeof(*p_type))))
+			return (NULL);
+		if (*p_type == type)
+		{
+			p_hdr->p_type = *p_type;
+			free(p_type);
+			return (fill_phdr_entry(param, leak_data, e_hdr, p_hdr, i));
+		}
+		i += sizeof(*p_hdr);
+	}
+	free(p_hdr);
+	p_hdr = NULL;
 	return (p_hdr);
 }
 
@@ -99,6 +202,43 @@ int						elf_x64_valid(Elf64_Ehdr *e_hdr)
 	return (0);
 }
 
+/* Need only l_addr and l_next */
+
+struct link_map				*linkmap_elem(void *param, t_leak_ft leak_data,
+										  long lm_addr)
+{
+	struct link_map			*link_map;
+	ElfW(Addr)				*l_addr;
+	ElfW(Dyn)				**l_ld;
+	struct link_map			**l_next;
+	long					off;
+
+	if (!(link_map = malloc(sizeof(*link_map))))
+		return (NULL);
+	if (!(l_addr = leak_data(param, lm_addr, sizeof(*l_addr))))
+	{
+		free(link_map);
+		return (NULL);
+	}
+	link_map->l_addr = *l_addr;
+	free(l_addr);
+	off = sizeof(*l_addr) + sizeof(char *);
+	if (!(l_ld = leak_data(param, lm_addr + off, sizeof(*l_ld))))
+	{
+		free(link_map);
+		return (NULL);
+	}
+	link_map->l_ld = *l_ld;
+	free(l_ld);
+	off += sizeof(*l_ld);
+	if (!(l_next = leak_data(param, lm_addr + off, sizeof(*l_next))))
+	{
+		free(link_map);
+		return (NULL);
+	}
+	link_map->l_next = *l_next;
+	return (link_map);
+}
 
 static struct link_map		*elf_linkmap_base(void *param, t_leak_ft leak_data,
 											  Elf64_Dyn *got)
@@ -110,7 +250,8 @@ static struct link_map		*elf_linkmap_base(void *param, t_leak_ft leak_data,
 	/* link_map is second entry in GOT */
 	lm_addr = leak_data(param, got->d_un.d_ptr + sizeof(long),
 						sizeof(long));
-	link_map = leak_data(param, *lm_addr, sizeof(*link_map));
+/*	link_map = leak_data(param, *lm_addr, sizeof(*link_map)); */
+	link_map = linkmap_elem(param, leak_data, *lm_addr);
 	free(lm_addr);
 	return (link_map);
 }
@@ -127,8 +268,8 @@ struct link_map				*leak_elf_linkmap(void *param, t_leak_ft leak_data,
 	{
 		/*	link_map->l_name = get_str(param, (long)link_map->l_name); */
 		if (link_map->l_next)
-			link_map->l_next = leak_data(param, (long)link_map->l_next,
-										 sizeof(*link_map));
+			link_map->l_next = linkmap_elem(param, leak_data,
+											(long)link_map->l_next);
 		link_map = link_map->l_next;
 	}
 	return (l);
@@ -191,6 +332,7 @@ char							*leak_str(void *data, t_leak_ft leak_data,
 	return (s);
 }
 
+/*
 Elf64_Addr				leak_elf_symbol_addr(void *param, t_leak_ft leak_data,
 											 struct link_map *link_map,
 											 t_tables_addr *tables, char *name)
@@ -222,6 +364,54 @@ Elf64_Addr				leak_elf_symbol_addr(void *param, t_leak_ft leak_data,
 	}
 	return (ret);
 }
+*/
+
+Elf64_Addr		symbol_value(void *param, t_leak_ft leak_data,
+							 struct link_map *link_map, long value_off)
+{
+	Elf64_Addr	ret;
+	Elf64_Addr	*st_value;
+
+	value_off += sizeof(Elf64_Word) + sizeof(unsigned char) * 2
+		+ sizeof(Elf64_Section);
+	if (!(st_value = leak_data(param, + value_off, sizeof(*st_value))))
+	   	return (0);
+   	ret = link_map->l_addr + *st_value;
+   	free(st_value);
+	return (ret);
+}
+
+/* Need only st_name and st_value from symtab entry */
+Elf64_Addr				leak_elf_symbol_addr(void *param, t_leak_ft leak_data,
+											 struct link_map *link_map,
+											 t_tables_addr *tables, char *name)
+{
+	size_t				i;
+	char				*s;
+	Elf64_Word			*st_name;
+
+	i = 0;
+	if (tables->nchains)
+	{
+		while (i < *tables->nchains)
+		{
+			if (!(st_name = leak_data(param, tables->symtab + i
+									  * sizeof(Elf64_Sym), sizeof(*st_name))))
+				return (0);
+			if ((s = leak_str(param, leak_data,
+							  (long)tables->strtab + *st_name)))
+			{
+				if (!strcmp(name, s))
+					return (symbol_value(param, leak_data, link_map,
+										 tables->symtab + i * sizeof(Elf64_Sym)));
+			}
+			free(st_name);
+			++i;
+		}
+	}
+	return (0);
+}
+
 
 Elf64_Addr					leak_elf_sym_addr(int pid, t_leak_ft leak_ft,
 										  char *symname)
