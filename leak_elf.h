@@ -6,6 +6,7 @@
 # include <unistd.h>
 # include <stdlib.h>
 # include <string.h>
+# include <stddef.h>
 
 # define BASE_ADDRESS	0x400000
 
